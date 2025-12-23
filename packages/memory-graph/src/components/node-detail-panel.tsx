@@ -91,7 +91,7 @@ export const NodeDetailPanel = memo(function NodeDetailPanel({
 			exit={{ opacity: 0 }}
 			initial={{ opacity: 0 }}
 			transition={{
-				duration: 0.2,
+				duration: 0.5,
 				ease: "easeInOut",
 			}}
 		>

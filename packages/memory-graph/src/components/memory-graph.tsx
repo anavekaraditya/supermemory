@@ -467,6 +467,7 @@ export const MemoryGraph = ({
 						onWheel={handleWheel}
 						panX={panX}
 						panY={panY}
+						selectedNodeId={selectedNode}
 						width={containerSize.width}
 						zoom={zoom}
 					/>

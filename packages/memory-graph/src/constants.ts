@@ -49,6 +49,41 @@ export const colors = {
 	},
 }
 
+// Document type to color mapping for memory nodes
+export const documentTypeColors: Record<string, string> = {
+	// Google
+	google_doc: "rgba(66, 133, 244, 0.4)", // Google Blue
+	google_sheet: "rgba(16, 185, 129, 0.4)", // Google Green
+	google_slide: "rgba(251, 188, 4, 0.4)", // Google Yellow
+	google_drive: "rgba(66, 133, 244, 0.4)", // Google Blue
+	
+	// Microsoft
+	word: "rgba(43, 87, 154, 0.4)", // Microsoft Word Blue
+	microsoft_word: "rgba(43, 87, 154, 0.4)",
+	excel: "rgba(16, 124, 16, 0.4)", // Microsoft Excel Green
+	microsoft_excel: "rgba(16, 124, 16, 0.4)",
+	powerpoint: "rgba(210, 71, 38, 0.4)", // Microsoft PowerPoint Orange
+	microsoft_powerpoint: "rgba(210, 71, 38, 0.4)",
+	onenote: "rgba(114, 83, 178, 0.4)", // Microsoft OneNote Purple
+	microsoft_onenote: "rgba(114, 83, 178, 0.4)",
+	onedrive: "rgba(0, 120, 212, 0.4)", // Microsoft OneDrive Blue
+	
+	// Other
+	notion: "rgba(0, 0, 0, 0.4)", // Notion Black
+	notion_doc: "rgba(0, 0, 0, 0.4)",
+	pdf: "rgba(220, 38, 38, 0.4)", // PDF Red
+	
+	// Default
+	default: "rgba(148, 163, 184, 0.4)", // Slate gray
+}
+
+export const getDocumentTypeColor = (type: string | null | undefined): string => {
+	if (!type) return documentTypeColors.default as string
+	const normalizedType = type.toLowerCase().replace(/\s+/g, "_")
+	const color = documentTypeColors[normalizedType]
+	return (color ?? documentTypeColors.default) as string
+}
+
 export const LAYOUT_CONSTANTS = {
 	centerX: 400,
 	centerY: 300,

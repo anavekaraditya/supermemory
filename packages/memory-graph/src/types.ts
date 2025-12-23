@@ -74,6 +74,8 @@ export interface GraphCanvasProps {
 	draggingNodeId: string | null
 	// Optional list of document IDs (customId or internal id) to highlight
 	highlightDocumentIds?: string[]
+	// Selected document node ID - edges are only shown when a document is selected or zoomed in
+	selectedNodeId?: string | null
 }
 
 export interface MemoryGraphProps {

@@ -41,6 +41,7 @@ export const GraphCanvas = memo<GraphCanvasProps>(
 		onTouchEnd,
 		draggingNodeId,
 		highlightDocumentIds,
+		selectedNodeId,
 	}) => {
 		const canvasRef = useRef<HTMLCanvasElement>(null)
 		const animationRef = useRef<number>(0)
@@ -112,15 +113,10 @@ export const GraphCanvas = memo<GraphCanvasProps>(
 				const y = e.clientY - rect.top
 
 				const nodeId = getNodeAtPosition(x, y)
-				if (nodeId) {
-					// When starting a node drag, prevent initiating pan
-					e.stopPropagation()
-					onNodeDragStart(nodeId, e)
-					return
-				}
+				// Nodes are fixed - no dragging allowed, just panning
 				onPanStart(e)
 			},
-			[getNodeAtPosition, onNodeDragStart, onPanStart],
+			[getNodeAtPosition, onPanStart],
 		)
 
 		const handleClick = useCallback(
@@ -161,32 +157,62 @@ export const GraphCanvas = memo<GraphCanvasProps>(
 			ctx.imageSmoothingEnabled = true
 			ctx.imageSmoothingQuality = "high"
 
-			// Draw minimal background grid
-			ctx.strokeStyle = "rgba(148, 163, 184, 0.03)" // Very subtle grid
-			ctx.lineWidth = 1
-			const gridSpacing = 100 * zoom
+			// Draw isometric background grid (dark mode with subtle pattern)
+			ctx.strokeStyle = "rgba(148, 163, 184, 0.06)" // Subtle isometric grid
+			ctx.lineWidth = 0.5
+			const gridSpacing = 120 * zoom
 			const offsetX = panX % gridSpacing
 			const offsetY = panY % gridSpacing
 
-			// Simple, clean grid lines
-			for (let x = offsetX; x < width; x += gridSpacing) {
+			// Isometric grid pattern (30-degree angle for isometric projection)
+			const isoAngle = Math.PI / 6 // 30 degrees
+			const cos30 = Math.cos(isoAngle)
+			const sin30 = Math.sin(isoAngle)
+
+			// Draw isometric diamond grid pattern
+			for (let i = -20; i < width / gridSpacing + 20; i++) {
+				const baseX = i * gridSpacing + offsetX
+				
+				// Diagonal lines going up-right (isometric)
 				ctx.beginPath()
-				ctx.moveTo(x, 0)
-				ctx.lineTo(x, height)
+				ctx.moveTo(baseX, 0)
+				ctx.lineTo(baseX + width * cos30, height)
+				ctx.stroke()
+				
+				// Diagonal lines going up-left (isometric)
+				ctx.beginPath()
+				ctx.moveTo(baseX, 0)
+				ctx.lineTo(baseX - width * cos30, height)
 				ctx.stroke()
 			}
-			for (let y = offsetY; y < height; y += gridSpacing) {
+			
+			// Horizontal-ish lines for isometric grid
+			for (let i = -20; i < height / gridSpacing + 20; i++) {
+				const baseY = i * gridSpacing + offsetY
 				ctx.beginPath()
-				ctx.moveTo(0, y)
-				ctx.lineTo(width, y)
+				ctx.moveTo(0, baseY)
+				ctx.lineTo(width, baseY)
 				ctx.stroke()
 			}
 
 			// Create node lookup map
 			const nodeMap = new Map(nodes.map((node) => [node.id, node]))
 
-			// Draw enhanced edges with sophisticated styling
+			// Determine if edges should be visible
+			// Edges are COMPLETELY HIDDEN when zoomed out
+			// Edges are visible when:
+			// 1. A document is selected (selectedNodeId is a document), OR
+			// 2. Zoom is high enough (zoomed in > 0.6)
+			const isDocumentSelected =
+				selectedNodeId !== null &&
+				selectedNodeId !== undefined &&
+				nodes.find((n) => n.id === selectedNodeId)?.type === "document"
+			const isZoomedIn = zoom > 0.6
+			const shouldShowEdges = isDocumentSelected || isZoomedIn
+
+			// Draw enhanced edges with sophisticated styling (only if shouldShowEdges)
 			ctx.lineCap = "round"
+			if (shouldShowEdges) {
 			edges.forEach((edge) => {
 				const sourceNode = nodeMap.get(edge.source)
 				const targetNode = nodeMap.get(edge.target)
@@ -334,9 +360,142 @@ export const GraphCanvas = memo<GraphCanvasProps>(
 					}
 				}
 			})
+			}
 
 			ctx.globalAlpha = 1
 			ctx.setLineDash([])
+
+			// Helper function to draw an isometric 3D cube matching the reference image
+			const drawIsometricCube = (
+				ctx: CanvasRenderingContext2D,
+				x: number,
+				y: number,
+				size: number,
+				baseColor: string,
+				borderColor: string,
+				glowColor: string,
+				opacity: number = 1,
+			) => {
+				// Isometric projection constants - top-down view (shallow angle for top visibility)
+				// Using a shallower angle (30 degrees) to show more of the top face
+				const isoAngle = Math.PI / 6 // 30 degrees for top-down view
+				const cos30 = Math.cos(isoAngle)
+				const sin30 = Math.sin(isoAngle)
+
+				// Cube dimensions - all nodes on same plane (no depth variation)
+				const cubeSize = size * 0.8
+				const depth = cubeSize * 0.3 // Reduced depth to show more top face
+
+				// Calculate isometric offsets (same for all nodes) - top-down perspective
+				const offsetX = depth * cos30
+				const offsetY = depth * sin30
+
+				// Top face (with blue glow) - all on same plane
+				const topFace = [
+					{ x: x - cubeSize / 2, y: y - cubeSize / 2 - offsetY },
+					{ x: x + cubeSize / 2, y: y - cubeSize / 2 - offsetY },
+					{ x: x + cubeSize / 2 + offsetX, y: y - cubeSize / 2 },
+					{ x: x - cubeSize / 2 + offsetX, y: y - cubeSize / 2 },
+				]
+
+				// Right face
+				const rightFace = [
+					{ x: x + cubeSize / 2, y: y - cubeSize / 2 - offsetY },
+					{ x: x + cubeSize / 2, y: y + cubeSize / 2 - offsetY },
+					{ x: x + cubeSize / 2 + offsetX, y: y + cubeSize / 2 },
+					{ x: x + cubeSize / 2 + offsetX, y: y - cubeSize / 2 },
+				]
+
+				// Front face
+				const frontFace = [
+					{ x: x - cubeSize / 2, y: y - cubeSize / 2 - offsetY },
+					{ x: x + cubeSize / 2, y: y - cubeSize / 2 - offsetY },
+					{ x: x + cubeSize / 2, y: y + cubeSize / 2 - offsetY },
+					{ x: x - cubeSize / 2, y: y + cubeSize / 2 - offsetY },
+				]
+
+				ctx.save()
+				ctx.globalAlpha = opacity
+
+				// Draw cube body - dark grey/black (matching reference)
+				const darkCubeColor = "rgba(30, 30, 30, 0.95)" // Dark grey, almost black
+				
+				// Draw right face (slightly darker)
+				ctx.fillStyle = darkCubeColor
+				ctx.beginPath()
+				ctx.moveTo(rightFace[0]!.x, rightFace[0]!.y)
+				rightFace.slice(1).forEach((point) => ctx.lineTo(point.x, point.y))
+				ctx.closePath()
+				ctx.fill()
+
+				// Draw front face
+				ctx.fillStyle = darkCubeColor
+				ctx.beginPath()
+				ctx.moveTo(frontFace[0]!.x, frontFace[0]!.y)
+				frontFace.slice(1).forEach((point) => ctx.lineTo(point.x, point.y))
+				ctx.closePath()
+				ctx.fill()
+
+				// Draw vibrant blue glow with soft halo effect on top face
+				// Create gradient for the glow effect - top face is more prominent in top-down view
+				const centerX = (topFace[0]!.x + topFace[1]!.x + topFace[2]!.x + topFace[3]!.x) / 4
+				const centerY = (topFace[0]!.y + topFace[1]!.y + topFace[2]!.y + topFace[3]!.y) / 4
+				const glowRadius = cubeSize * 0.85 // Larger glow radius for top-down view
+				
+				// Use vibrant blue for the glow (matching reference image)
+				// Outer halo (soft, diffuse) - extends beyond top face edges
+				const haloGradient = ctx.createRadialGradient(
+					centerX, centerY, 0,
+					centerX, centerY, glowRadius
+				)
+				haloGradient.addColorStop(0, "rgba(59, 130, 246, 0.9)") // Vibrant blue center
+				haloGradient.addColorStop(0.3, "rgba(59, 130, 246, 0.7)") // Strong glow
+				haloGradient.addColorStop(0.5, "rgba(59, 130, 246, 0.5)") // Medium glow
+				haloGradient.addColorStop(0.7, "rgba(59, 130, 246, 0.3)") // Soft edge
+				haloGradient.addColorStop(0.9, "rgba(59, 130, 246, 0.1)") // Very soft
+				haloGradient.addColorStop(1, "rgba(59, 130, 246, 0)") // Fade to transparent
+				
+				ctx.fillStyle = haloGradient
+				ctx.beginPath()
+				ctx.arc(centerX, centerY, glowRadius, 0, Math.PI * 2)
+				ctx.fill()
+
+				// Top face with vibrant blue (solid center) - matching reference
+				ctx.fillStyle = "rgba(59, 130, 246, 0.95)" // Vibrant blue square
+				ctx.beginPath()
+				ctx.moveTo(topFace[0]!.x, topFace[0]!.y)
+				topFace.slice(1).forEach((point) => ctx.lineTo(point.x, point.y))
+				ctx.closePath()
+				ctx.fill()
+
+				// Draw clearly defined edges
+				ctx.strokeStyle = "rgba(148, 163, 184, 0.4)" // Subtle edge color
+				ctx.lineWidth = 1.5
+				ctx.globalAlpha = opacity
+
+				// Top face edges
+				ctx.beginPath()
+				ctx.moveTo(topFace[0]!.x, topFace[0]!.y)
+				topFace.forEach((point) => ctx.lineTo(point.x, point.y))
+				ctx.closePath()
+				ctx.stroke()
+
+				// Right face edges
+				ctx.beginPath()
+				ctx.moveTo(rightFace[0]!.x, rightFace[0]!.y)
+				rightFace.forEach((point) => ctx.lineTo(point.x, point.y))
+				ctx.closePath()
+				ctx.stroke()
+
+				// Front face edges
+				ctx.beginPath()
+				ctx.moveTo(frontFace[0]!.x, frontFace[0]!.y)
+				frontFace.forEach((point) => ctx.lineTo(point.x, point.y))
+				ctx.closePath()
+				ctx.stroke()
+
+				ctx.restore()
+			}
 
 			// Prepare highlight set from provided document IDs (customId or internal)
 			const highlightSet = new Set<string>(highlightDocumentIds ?? [])
@@ -368,52 +527,46 @@ export const GraphCanvas = memo<GraphCanvasProps>(
 				})()
 
 				if (node.type === "document") {
-					// Enhanced glassmorphism document styling
-					const docWidth = nodeSize * 1.4
-					const docHeight = nodeSize * 0.9
-
-					// Multi-layer glass effect
-					ctx.fillStyle = isDragging
-						? colors.document.accent
+					// Determine colors based on state
+					let baseColor = isDragging
+						? "rgba(148, 163, 184, 0.15)"
 						: isHovered
-							? colors.document.secondary
-							: colors.document.primary
-					ctx.globalAlpha = 1
-
-					// Enhanced border with subtle glow
-					ctx.strokeStyle = isDragging
-						? colors.document.glow
+							? "rgba(148, 163, 184, 0.12)"
+							: "rgba(148, 163, 184, 0.08)"
+					let borderColor = isDragging
+						? "rgba(148, 163, 184, 0.4)"
 						: isHovered
-							? colors.document.accent
-							: colors.document.border
-					ctx.lineWidth = isDragging ? 3 : isHovered ? 2 : 1
+							? "rgba(148, 163, 184, 0.3)"
+							: "rgba(148, 163, 184, 0.2)"
+					let glowColor = isDragging
+						? "rgba(59, 130, 246, 0.8)"
+						: isHovered
+							? "rgba(59, 130, 246, 0.6)"
+							: "rgba(59, 130, 246, 0.4)"
 
-					// Rounded rectangle with enhanced styling
-					const radius = useSimplifiedRendering ? 6 : 12
-					ctx.beginPath()
-					ctx.roundRect(
-						screenX - docWidth / 2,
-						screenY - docHeight / 2,
-						docWidth,
-						docHeight,
-						radius,
-					)
-					ctx.fill()
-					ctx.stroke()
-
-					// Subtle inner highlight for glass effect (skip when zoomed out)
-					if (!useSimplifiedRendering && (isHovered || isDragging)) {
-						ctx.strokeStyle = "rgba(255, 255, 255, 0.1)"
+					// Draw isometric cube for document nodes
+					if (useSimplifiedRendering) {
+						// Simple square when zoomed out
+						const size = nodeSize * 0.8
+						ctx.fillStyle = baseColor
+						ctx.globalAlpha = 1
+						ctx.strokeStyle = borderColor
 						ctx.lineWidth = 1
 						ctx.beginPath()
-						ctx.roundRect(
-							screenX - docWidth / 2 + 1,
-							screenY - docHeight / 2 + 1,
-							docWidth - 2,
-							docHeight - 2,
-							radius - 1,
-						)
+						ctx.rect(screenX - size / 2, screenY - size / 2, size, size)
+						ctx.fill()
 						ctx.stroke()
+					} else {
+						drawIsometricCube(
+							ctx,
+							screenX,
+							screenY,
+							nodeSize,
+							baseColor,
+							borderColor,
+							glowColor,
+							1,
+						)
 					}
 
 					// Highlight ring for search hits
@@ -423,15 +576,9 @@ export const GraphCanvas = memo<GraphCanvasProps>(
 						ctx.strokeStyle = colors.accent.primary
 						ctx.lineWidth = 3
 						ctx.setLineDash([6, 4])
-						const ringPadding = 10
+						const ringSize = nodeSize * 0.5
 						ctx.beginPath()
-						ctx.roundRect(
-							screenX - docWidth / 2 - ringPadding,
-							screenY - docHeight / 2 - ringPadding,
-							docWidth + ringPadding * 2,
-							docHeight + ringPadding * 2,
-							radius + 6,
-						)
+						ctx.arc(screenX, screenY, ringSize, 0, 2 * Math.PI)
 						ctx.stroke()
 						ctx.setLineDash([])
 						ctx.restore()
@@ -458,12 +605,12 @@ export const GraphCanvas = memo<GraphCanvasProps>(
 						new Date(mem.createdAt).getTime() > Date.now() - 1000 * 60 * 60 * 24
 
 					// Determine colors based on status
-					let fillColor = colors.memory.primary
-					let borderColor = colors.memory.border
-					let glowColor = colors.memory.glow
+					let baseColor = "rgba(148, 163, 184, 0.08)"
+					let borderColor = "rgba(148, 163, 184, 0.2)"
+					let glowColor = "rgba(59, 130, 246, 0.4)"
 
 					if (isForgotten) {
-						fillColor = colors.status.forgotten
+						baseColor = colors.status.forgotten
 						borderColor = "rgba(220,38,38,0.3)"
 						glowColor = "rgba(220,38,38,0.2)"
 					} else if (expiringSoon) {
@@ -475,62 +622,38 @@ export const GraphCanvas = memo<GraphCanvasProps>(
 					}
 
 					if (isDragging) {
-						fillColor = colors.memory.accent
+						baseColor = "rgba(148, 163, 184, 0.15)"
 						borderColor = glowColor
 					} else if (isHovered) {
-						fillColor = colors.memory.secondary
+						baseColor = "rgba(148, 163, 184, 0.12)"
+						glowColor = "rgba(59, 130, 246, 0.6)"
 					}
 
-					const radius = nodeSize / 2
-
-					ctx.fillStyle = fillColor
-					ctx.globalAlpha = isLatest ? 1 : 0.4
-					ctx.strokeStyle = borderColor
-					ctx.lineWidth = isDragging ? 3 : isHovered ? 2 : 1.5
+					const opacity = isLatest ? 1 : 0.4
 
 					if (useSimplifiedRendering) {
 						// Simple circles when zoomed out for performance
+						const radius = nodeSize / 2
+						ctx.fillStyle = baseColor
+						ctx.globalAlpha = opacity
+						ctx.strokeStyle = borderColor
+						ctx.lineWidth = isDragging ? 3 : isHovered ? 2 : 1.5
 						ctx.beginPath()
 						ctx.arc(screenX, screenY, radius, 0, 2 * Math.PI)
 						ctx.fill()
 						ctx.stroke()
 					} else {
-						// HEXAGONAL memory nodes when zoomed in
-						const sides = 6
-						ctx.beginPath()
-						for (let i = 0; i < sides; i++) {
-							const angle = (i * 2 * Math.PI) / sides - Math.PI / 2 // Start from top
-							const x = screenX + radius * Math.cos(angle)
-							const y = screenY + radius * Math.sin(angle)
-							if (i === 0) {
-								ctx.moveTo(x, y)
-							} else {
-								ctx.lineTo(x, y)
-							}
-						}
-						ctx.closePath()
-						ctx.fill()
-						ctx.stroke()
-
-						// Inner highlight for glass effect
-						if (isHovered || isDragging) {
-							ctx.strokeStyle = "rgba(147, 197, 253, 0.3)"
-							ctx.lineWidth = 1
-							const innerRadius = radius - 2
-							ctx.beginPath()
-							for (let i = 0; i < sides; i++) {
-								const angle = (i * 2 * Math.PI) / sides - Math.PI / 2
-								const x = screenX + innerRadius * Math.cos(angle)
-								const y = screenY + innerRadius * Math.sin(angle)
-								if (i === 0) {
-									ctx.moveTo(x, y)
-								} else {
-									ctx.lineTo(x, y)
-								}
-							}
-							ctx.closePath()
-							ctx.stroke()
-						}
+						// Draw isometric cube for memory nodes
+						drawIsometricCube(
+							ctx,
+							screenX,
+							screenY,
+							nodeSize,
+							baseColor,
+							borderColor,
+							glowColor,
+							opacity,
+						)
 					}
 
 					// Status indicators overlay (always preserve these as required)
@@ -562,47 +685,81 @@ export const GraphCanvas = memo<GraphCanvasProps>(
 
 				// Enhanced hover glow effect (skip when zoomed out for performance)
 				if (!useSimplifiedRendering && (isHovered || isDragging)) {
-					const glowColor =
-						node.type === "document" ? colors.document.glow : colors.memory.glow
+					const glowColor = "rgba(59, 130, 246, 0.4)"
 
 					ctx.strokeStyle = glowColor
-					ctx.lineWidth = 1
-					ctx.setLineDash([3, 3])
+					ctx.lineWidth = 2
 					ctx.globalAlpha = 0.6
 
+					// Circular glow around the cube
 					ctx.beginPath()
-					const glowSize = nodeSize * 0.7
-					if (node.type === "document") {
-						ctx.roundRect(
-							screenX - glowSize,
-							screenY - glowSize / 1.4,
-							glowSize * 2,
-							glowSize * 1.4,
-							15,
-						)
-					} else {
-						// Hexagonal glow for memory nodes
-						const glowRadius = glowSize
-						const sides = 6
-						for (let i = 0; i < sides; i++) {
-							const angle = (i * 2 * Math.PI) / sides - Math.PI / 2
-							const x = screenX + glowRadius * Math.cos(angle)
-							const y = screenY + glowRadius * Math.sin(angle)
-							if (i === 0) {
-								ctx.moveTo(x, y)
-							} else {
-								ctx.lineTo(x, y)
-							}
-						}
-						ctx.closePath()
-					}
+					const glowRadius = nodeSize * 0.6
+					ctx.arc(screenX, screenY, glowRadius, 0, 2 * Math.PI)
 					ctx.stroke()
-					ctx.setLineDash([])
+				}
+
+				// Draw document labels with pin when zoomed out
+				if (node.type === "document" && zoom < 0.5) {
+					const doc = node.data as DocumentWithMemories
+					const labelY = screenY - nodeSize / 2 - 25 // Position above the node
+					const pinEndY = screenY - nodeSize / 2 // End of pin at top of node
+
+					// Draw pin line
+					ctx.strokeStyle = "rgba(148, 163, 184, 0.4)"
+					ctx.lineWidth = 1
+					ctx.globalAlpha = 0.6
+					ctx.beginPath()
+					ctx.moveTo(screenX, pinEndY)
+					ctx.lineTo(screenX, labelY)
+					ctx.stroke()
+
+					// Draw label background
+					const labelText = doc.title || doc.type || "Document"
+					const maxLabelWidth = 120
+					ctx.font = `${12 * zoom}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`
+					const textMetrics = ctx.measureText(labelText)
+					const labelWidth = Math.min(textMetrics.width + 16, maxLabelWidth)
+					const labelHeight = 20
+
+					ctx.fillStyle = "rgba(15, 20, 25, 0.9)" // Dark background
+					ctx.strokeStyle = "rgba(148, 163, 184, 0.3)"
+					ctx.lineWidth = 1
+					ctx.globalAlpha = 0.9
+					ctx.beginPath()
+						ctx.roundRect(
+						screenX - labelWidth / 2,
+						labelY - labelHeight / 2,
+						labelWidth,
+						labelHeight,
+						4,
+					)
+					ctx.fill()
+					ctx.stroke()
+
+					// Draw document type icon (simple shape)
+					const iconSize = 10
+					const iconX = screenX - labelWidth / 2 + 6
+					const iconY = labelY
+					ctx.fillStyle = "rgba(148, 163, 184, 0.8)"
+					ctx.globalAlpha = 1
+					// Simple document icon (rectangle)
+					ctx.fillRect(iconX - iconSize / 2, iconY - iconSize / 2, iconSize, iconSize)
+
+					// Draw text
+					ctx.fillStyle = "rgba(255, 255, 255, 0.9)"
+					ctx.textAlign = "left"
+					ctx.textBaseline = "middle"
+					const textX = screenX - labelWidth / 2 + 18
+					const truncatedText =
+						textMetrics.width > maxLabelWidth - 24
+							? labelText.substring(0, Math.floor((maxLabelWidth - 24) / (textMetrics.width / labelText.length))) + "..."
+							: labelText
+					ctx.fillText(truncatedText, textX, labelY)
 				}
 			})
 
 			ctx.globalAlpha = 1
-		}, [nodes, edges, panX, panY, zoom, width, height, highlightDocumentIds])
+		}, [nodes, edges, panX, panY, zoom, width, height, highlightDocumentIds, selectedNodeId])
 
 		// Change-based rendering instead of continuous animation
 		const lastRenderParams = useRef<string>("")
@@ -616,7 +773,7 @@ export const GraphCanvas = memo<GraphCanvasProps>(
 				)
 				.join("|")
 			const highlightKey = (highlightDocumentIds ?? []).join("|")
-			return `${nodePositions}-${edges.length}-${panX}-${panY}-${zoom}-${width}-${height}-${highlightKey}`
+			return `${nodePositions}-${edges.length}-${panX}-${panY}-${zoom}-${width}-${height}-${highlightKey}-${selectedNodeId ?? ""}`
 		}, [
 			nodes,
 			edges.length,

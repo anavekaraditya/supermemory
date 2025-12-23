@@ -257,7 +257,7 @@ export const Legend = memo(function Legend({
 										<div className={styles.itemsList}>
 											<div className={styles.legendItem}>
 												<div className={styles.weakSimilarity} />
-												<span className={styles.legendText}>Weak</span>
+												<span className={styles.legendText}>Weaker</span>
 											</div>
 											<div className={styles.legendItem}>
 												<div className={styles.strongSimilarity} />

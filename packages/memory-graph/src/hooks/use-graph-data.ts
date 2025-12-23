@@ -6,7 +6,7 @@ import {
 	getMagicalConnectionColor,
 } from "@/lib/similarity"
 import { useMemo } from "react"
-import { colors, LAYOUT_CONSTANTS } from "@/constants"
+import { colors, LAYOUT_CONSTANTS, getDocumentTypeColor } from "@/constants"
 import type {
 	DocumentsResponse,
 	DocumentWithMemories,
@@ -69,110 +69,44 @@ export function useGraphData(
 			}
 		})
 
-		// Enhanced Layout with Space Separation
-		const { centerX, centerY, clusterRadius, spaceSpacing, documentSpacing } =
-			LAYOUT_CONSTANTS
+		// Grid-based isometric layout (single plane) - no overlaps
+		const { centerX, centerY, clusterRadius } = LAYOUT_CONSTANTS
+		
+		// Grid parameters for isometric layout - increased spacing to prevent overlaps
+		const docNodeSize = 80 // Document node size
+		const memNodeSize = 40 // Memory node size
+		const gridCellSize = 300 // Increased spacing between document grid cells to prevent overlaps
+		const docsPerRow = Math.ceil(Math.sqrt(filteredDocuments.length)) // Square-ish grid
+		
+		// Memory grid spacing - increased to prevent overlaps
+		const memGridSize = Math.max(80, memNodeSize * 2.5) // At least 2.5x node size for spacing
 
-		/* 1. Build DOCUMENT nodes with space-aware clustering */
+		/* 1. Build DOCUMENT nodes in grid layout */
 		const documentNodes: GraphNode[] = []
-		let spaceIndex = 0
 
-		documentsBySpace.forEach((spaceDocs) => {
-			const spaceAngle = (spaceIndex / documentsBySpace.size) * Math.PI * 2
-			const spaceOffsetX = Math.cos(spaceAngle) * spaceSpacing
-			const spaceOffsetY = Math.sin(spaceAngle) * spaceSpacing
-			const spaceCenterX = centerX + spaceOffsetX
-			const spaceCenterY = centerY + spaceOffsetY
+		filteredDocuments.forEach((doc: DocumentWithMemories, docIndex: number) => {
+			// Nodes are fixed in grid - no custom positions allowed
+			// Calculate grid position
+			const row = Math.floor(docIndex / docsPerRow)
+			const col = docIndex % docsPerRow
+			
+			// Isometric grid positioning (staggered rows) - fixed positions for top-down view
+			const isoOffset = row % 2 === 0 ? 0 : gridCellSize * 0.5 // Stagger alternate rows
+			const defaultX = centerX + (col * gridCellSize) - (docsPerRow * gridCellSize * 0.5) + isoOffset
+			const defaultY = centerY + (row * gridCellSize * 0.866) - (Math.ceil(filteredDocuments.length / docsPerRow) * gridCellSize * 0.433) // 0.866 = sin(60°) for 30° isometric
 
-			spaceDocs.forEach((doc, docIndex) => {
-				// Create proper circular layout with concentric rings
-				const docsPerRing = 6 // Start with 6 docs in inner ring
-				let currentRing = 0
-				let docsInCurrentRing = docsPerRing
-				let totalDocsInPreviousRings = 0
-
-				// Find which ring this document belongs to
-				while (totalDocsInPreviousRings + docsInCurrentRing <= docIndex) {
-					totalDocsInPreviousRings += docsInCurrentRing
-					currentRing++
-					docsInCurrentRing = docsPerRing + currentRing * 4 // Each ring has more docs
-				}
-
-				// Position within the ring
-				const positionInRing = docIndex - totalDocsInPreviousRings
-				const angleInRing = (positionInRing / docsInCurrentRing) * Math.PI * 2
-
-				// Radius increases significantly with each ring
-				const baseRadius = documentSpacing * 0.8
-				const radius =
-					currentRing === 0
-						? baseRadius
-						: baseRadius + currentRing * documentSpacing * 1.2
-
-				const defaultX = spaceCenterX + Math.cos(angleInRing) * radius
-				const defaultY = spaceCenterY + Math.sin(angleInRing) * radius
-
-				const customPos = nodePositions.get(doc.id)
-
-				documentNodes.push({
-					id: doc.id,
-					type: "document",
-					x: customPos?.x ?? defaultX,
-					y: customPos?.y ?? defaultY,
-					data: doc,
-					size: 58,
-					color: colors.document.primary,
-					isHovered: false,
-					isDragging: draggingNodeId === doc.id,
-				} satisfies GraphNode)
-			})
-
-			spaceIndex++
+			documentNodes.push({
+				id: doc.id,
+				type: "document",
+				x: defaultX,
+				y: defaultY,
+				data: doc,
+				size: docNodeSize, // 2x larger than memory nodes (40)
+				color: colors.document.primary,
+				isHovered: false,
+				isDragging: false, // Nodes are fixed, no dragging
+			} satisfies GraphNode)
 		})
-
-		/* 2. Gentle document collision avoidance with dampening */
-		const minDocDist = LAYOUT_CONSTANTS.minDocDist
-
-		// Reduced iterations and gentler repulsion for smoother movement
-		for (let iter = 0; iter < 2; iter++) {
-			documentNodes.forEach((nodeA) => {
-				documentNodes.forEach((nodeB) => {
-					if (nodeA.id >= nodeB.id) return
-
-					// Only repel documents in the same space
-					const spaceA =
-						(nodeA.data as DocumentWithMemories).memoryEntries[0]
-							?.spaceContainerTag ??
-						(nodeA.data as DocumentWithMemories).memoryEntries[0]?.spaceId ??
-						"default"
-					const spaceB =
-						(nodeB.data as DocumentWithMemories).memoryEntries[0]
-							?.spaceContainerTag ??
-						(nodeB.data as DocumentWithMemories).memoryEntries[0]?.spaceId ??
-						"default"
-
-					if (spaceA !== spaceB) return
-
-					const dx = nodeB.x - nodeA.x
-					const dy = nodeB.y - nodeA.y
-					const dist = Math.sqrt(dx * dx + dy * dy) || 1
-
-					if (dist < minDocDist) {
-						// Much gentler push with dampening
-						const push = (minDocDist - dist) / 8
-						const dampening = Math.max(0.1, Math.min(1, dist / minDocDist))
-						const smoothPush = push * dampening * 0.5
-
-						const nx = dx / dist
-						const ny = dy / dist
-						nodeA.x -= nx * smoothPush
-						nodeA.y -= ny * smoothPush
-						nodeB.x += nx * smoothPush
-						nodeB.y += ny * smoothPush
-					}
-				})
-			})
-		}
 
 		allNodes.push(...documentNodes)
 
@@ -183,36 +117,33 @@ export function useGraphData(
 
 			doc.memoryEntries.forEach((memory, memIndex) => {
 				const memoryId = `${memory.id}`
-				const customMemPos = nodePositions.get(memoryId)
 
-				const clusterAngle = (memIndex / doc.memoryEntries.length) * Math.PI * 2
-				const variation = Math.sin(memIndex * 2.5) * 0.3 + 0.7
-				const distance = clusterRadius * variation
-
-				const seed =
-					memIndex * 12345 + Number.parseInt(docNode.id.slice(0, 6), 36)
-				const offsetX = Math.sin(seed) * 0.5 * 40
-				const offsetY = Math.cos(seed) * 0.5 * 40
-
-				const defaultMemX =
-					docNode.x + Math.cos(clusterAngle) * distance + offsetX
-				const defaultMemY =
-					docNode.y + Math.sin(clusterAngle) * distance + offsetY
+				// Arrange memories in a grid pattern around the document - no overlaps
+				const memsPerRow = Math.ceil(Math.sqrt(doc.memoryEntries.length))
+				const memRow = Math.floor(memIndex / memsPerRow)
+				const memCol = memIndex % memsPerRow
+				
+				const memOffsetX = (memCol - (memsPerRow - 1) / 2) * memGridSize
+				const memOffsetY = (memRow - (Math.ceil(doc.memoryEntries.length / memsPerRow) - 1) / 2) * memGridSize * 0.866 // 0.866 = sin(60°) for 30° isometric
+				
+				// Position memories below document with proper spacing
+				const verticalOffset = docNodeSize / 2 + memNodeSize / 2 + 60 // Space between doc and memories
+				const defaultMemX = docNode.x + memOffsetX
+				const defaultMemY = docNode.y + memOffsetY + verticalOffset
 
 				if (!memoryNodeMap.has(memoryId)) {
+					// Get color based on parent document type
+					const docTypeColor = getDocumentTypeColor(doc.type)
 					const memoryNode: GraphNode = {
 						id: memoryId,
 						type: "memory",
-						x: customMemPos?.x ?? defaultMemX,
-						y: customMemPos?.y ?? defaultMemY,
+						x: defaultMemX, // Fixed grid position
+						y: defaultMemY, // Fixed grid position
 						data: memory,
-						size: Math.max(
-							32,
-							Math.min(48, (memory.memory?.length || 50) * 0.5),
-						),
-						color: colors.memory.primary,
+						size: memNodeSize, // Standard size (documents are 2x = 80)
+						color: docTypeColor, // Color based on document type
 						isHovered: false,
-						isDragging: draggingNodeId === memoryId,
+						isDragging: false, // Nodes are fixed, no dragging
 					}
 					memoryNodeMap.set(memoryId, memoryNode)
 					allNodes.push(memoryNode)
